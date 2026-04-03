@@ -1,36 +1,73 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Street View Guess Game
 
-## Getting Started
+GeoGuessr mantiginda calisan, Next.js ile yazilmis bir prototip. Oyun login istemez, middleware kullanmaz ve sadece istemcide `Oyna` tusuna basildiginda baslar. Street View panoramasi Google Maps uzerinden acilir, oyuncu mini haritada tahminini birakir, sistem de gercek konumla tahmin arasindaki mesafeyi hesaplayip puan verir.
 
-First, run the development server:
+## Veri Kaynagi
+
+Kaynak KML dosyasi:
+
+- `C:\Users\xmemo\OneDrive\Desktop\equitable-stochastic.2023-06-24.full.kml`
+
+Bu dosya runtime'da tarayicida parse edilmez. Bunun yerine build-time / one-time donusum ile `public/data/equitable-stochastic-2023-06-24.points.json` havuzuna cevrilir. Boylece ilk oyun baslangicinda istemci sadece hafif JSON dosyasini alir.
+
+KML donusum komutu:
+
+```bash
+npm run build:kml-points -- "C:\Users\xmemo\OneDrive\Desktop\equitable-stochastic.2023-06-24.full.kml"
+```
+
+Script her 3 placemark'tan birini alip oyun havuzuna yazar. Verilen KML yapisinda bu, tekrarli marker gruplarinin resolve edilmis noktasini kullanir.
+
+## Ozellikler
+
+- Google Maps JavaScript API ile Street View panorama yukleme
+- KML kaynagindan turetilmis statik lokasyon havuzu
+- `Oyna` tusu ile client-side baslayan akış
+- Ayarlanabilir round suresi secimi
+- Oyun baslangicinda fullscreen Street View viewport istegi
+- Sag mini haritayi buyutme / kucultme
+- sessionStorage ile refresh sonrasi round devami
+- Harita uzerine tahmin birakma
+- Haversine formulu ile mesafe hesaplama
+- Raund bazli skor, toplam skor ve ortalama sapma gostergeleri
+
+## Kurulum
+
+1. Bagimliliklari yukle:
+
+```bash
+npm install
+```
+
+2. Ornek ortam degiskenini kopyala:
+
+```bash
+copy .env.example .env.local
+```
+
+3. `.env.local` icine Google Maps anahtarini yaz:
+
+```env
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_google_maps_key_here
+```
+
+4. Google Cloud tarafinda su servis acik olmali:
+
+- Maps JavaScript API
+
+5. Gelistirme sunucusunu baslat:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+6. Tarayicida `http://localhost:3000` adresini ac.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Mimari Notlar
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Oyun artik otomatik baslamaz; `Oyna` veya varsa `Devam et` ile baslatilir.
+- Round suresi idle ekrandan secilir ve aktif session icinde korunur.
+- Middleware yoktur.
+- Aktif oyun snapshot'i sessionStorage'a yazilir; bu sayede refresh sonrasinda ayni round geri yuklenebilir.
+- Fullscreen istegi kullanici tiklamasiyla tetiklenir; tarayici izin vermezse oyun normal modda devam eder.
+- Lokasyon havuzu tek bir `fetch(..., { cache: "force-cache" })` ile kullanilir ve ayni oturumda memory promise ile tekrar yuklenmez.

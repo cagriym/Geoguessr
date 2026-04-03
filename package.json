@@ -3,12 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "build:kml-points": "node scripts/build-kml-points.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
+    "@types/google.maps": "^3.58.1",
     "next": "16.2.2",
     "react": "19.2.4",
     "react-dom": "19.2.4"
