@@ -35,6 +35,7 @@ type GamePhase =
   | "error";
 
 type RoundSummary = PersistedRoundSummary;
+type LaunchIntent = "new" | "resume" | null;
 
 function StatCard({
   label,
@@ -88,6 +89,7 @@ export function StreetGuessGame() {
   const [history, setHistory] = useState<RoundSummary[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
+  const [launchIntent, setLaunchIntent] = useState<LaunchIntent>(null);
   const hasRecoverableSession = useSyncExternalStore(
     subscribeToPersistedGameState,
     () => Boolean(loadPersistedGameState()),
@@ -120,6 +122,14 @@ export function StreetGuessGame() {
     }
 
     void targetElement.requestFullscreen?.().catch(() => {});
+  }, []);
+
+  const openLaunchPrompt = useCallback((intent: Exclude<LaunchIntent, null>) => {
+    setLaunchIntent(intent);
+  }, []);
+
+  const closeLaunchPrompt = useCallback(() => {
+    setLaunchIntent(null);
   }, []);
 
   const ensureGuessMarker = useCallback((point: google.maps.LatLngLiteral | null) => {
@@ -391,7 +401,6 @@ export function StreetGuessGame() {
   const startFreshGame = useCallback(async () => {
     try {
       setPhase("starting");
-      requestGameFullscreen();
       await ensureMapsReady();
       clearPersistedGameState();
       setIsMapExpanded(false);
@@ -404,12 +413,11 @@ export function StreetGuessGame() {
       setPhase("error");
       setErrorMessage(error instanceof Error ? error.message : "Oyun baslatilamadi.");
     }
-  }, [ensureMapsReady, loadRound, requestGameFullscreen, roundDurationSeconds]);
+  }, [ensureMapsReady, loadRound, roundDurationSeconds]);
 
   const restorePersistedGame = useCallback(async () => {
     try {
       setPhase("starting");
-      requestGameFullscreen();
 
       const snapshot = loadPersistedGameState();
 
@@ -469,7 +477,7 @@ export function StreetGuessGame() {
       setPhase("error");
       setErrorMessage(error instanceof Error ? error.message : "Kayitli oyun geri yuklenemedi.");
     }
-  }, [buildRoundOutcome, ensureMapsReady, hydrateRound, requestGameFullscreen, revealOnMap, startFreshGame]);
+  }, [buildRoundOutcome, ensureMapsReady, hydrateRound, revealOnMap, startFreshGame]);
 
   const submitGuess = useCallback(
     async (autoReveal = false) => {
@@ -497,6 +505,29 @@ export function StreetGuessGame() {
       revealOnMap(guess, target.position);
     },
     [buildRoundOutcome, guess, history, revealOnMap, round, score, target]
+  );
+
+  const handleLaunchDecision = useCallback(
+    async (shouldUseFullscreen: boolean) => {
+      const activeIntent = launchIntent;
+      closeLaunchPrompt();
+
+      if (!activeIntent) {
+        return;
+      }
+
+      if (shouldUseFullscreen) {
+        requestGameFullscreen();
+      }
+
+      if (activeIntent === "resume") {
+        await restorePersistedGame();
+        return;
+      }
+
+      await startFreshGame();
+    },
+    [closeLaunchPrompt, launchIntent, requestGameFullscreen, restorePersistedGame, startFreshGame]
   );
 
   useEffect(() => {
@@ -643,98 +674,27 @@ export function StreetGuessGame() {
           ref={gameViewportRef}
           className="relative overflow-hidden rounded-[36px] border border-white/10 bg-slate-950/65 shadow-[0_30px_120px_rgba(15,23,42,0.75)]"
         >
-          <div ref={streetViewElementRef} className="h-[54vh] min-h-[420px] w-full lg:h-[72vh]" />
+          <div ref={streetViewElementRef} className="h-[58vh] min-h-[440px] w-full lg:h-[78vh]" />
           <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(2,6,23,0.15),rgba(2,6,23,0.5))]" />
 
-          {phase === "idle" ? (
-            <div className="absolute inset-0 z-20 flex items-center justify-center p-6">
-              <div className="max-w-2xl rounded-[32px] border border-white/12 bg-slate-950/82 p-8 text-center shadow-[0_24px_80px_rgba(2,6,23,0.45)] backdrop-blur-xl">
-                <p className="text-[0.72rem] font-semibold uppercase tracking-[0.34em] text-cyan-200">
-                  Client Start
-                </p>
-                <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">
-                  Oyun ancak sen baslat dediginde yuklenir.
-                </h2>
-                <p className="mt-4 text-sm leading-7 text-slate-200 sm:text-base">
-                  `equitable-stochastic.2023-06-24.full.kml` dosyasi build sirasinda hafif
-                  lokasyon havuzuna donusturuldu. Maps ve veri havuzu sadece butona bastiginda
-                  istemci tarafinda alinacak.
-                </p>
+          <div className="absolute left-4 top-4 z-10 flex flex-wrap items-center gap-2">
+            <div className="rounded-full border border-white/16 bg-slate-950/74 px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em] text-slate-200 backdrop-blur-md">
+              Panoramada gezin, sonra sagdaki haritada tahmin birak.
+            </div>
+            <div className="rounded-full border border-white/16 bg-slate-950/74 px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200 backdrop-blur-md">
+              Round suresi {roundDurationSeconds}s
+            </div>
+          </div>
 
-                <div className="mt-6 rounded-[24px] border border-white/10 bg-white/6 p-4 text-left">
-                  <label
-                    htmlFor="round-duration"
-                    className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-slate-300"
-                  >
-                    Round suresi
-                  </label>
-                  <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
-                    <select
-                      id="round-duration"
-                      value={roundDurationSeconds}
-                      onChange={(event) => {
-                        setRoundDurationSeconds(Number(event.target.value));
-                        setTimer(Number(event.target.value));
-                      }}
-                      className="rounded-2xl border border-white/12 bg-slate-950/85 px-4 py-3 text-sm font-semibold text-white outline-none"
-                    >
-                      {ROUND_DURATION_OPTIONS.map((durationOption) => (
-                        <option key={durationOption} value={durationOption}>
-                          {durationOption} saniye
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-sm leading-6 text-slate-300">
-                      Sectigin sure yeni oyun ve yeni roundlar icin kullanilir. Aktif oturum
-                      refresh sonrasi ayni sure ayariyla devam eder.
-                    </p>
-                  </div>
-                </div>
-
-                {currentErrorMessage ? (
-                  <div className="mt-5 rounded-[22px] border border-red-400/30 bg-red-950/70 px-4 py-3 text-sm leading-6 text-red-100">
-                    {currentErrorMessage}
-                  </div>
-                ) : null}
-
-                <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
-                  <button
-                    type="button"
-                    onClick={() => void startFreshGame()}
-                    className="rounded-full bg-lime-400 px-6 py-3 text-sm font-bold uppercase tracking-[0.22em] text-slate-950 transition hover:bg-lime-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
-                    disabled={!apiKey}
-                  >
-                    Oyna
-                  </button>
-
-                  {hasRecoverableSession ? (
-                    <button
-                      type="button"
-                      onClick={() => void restorePersistedGame()}
-                      className="rounded-full border border-white/14 bg-white/7 px-6 py-3 text-sm font-bold uppercase tracking-[0.22em] text-white transition hover:bg-white/12 disabled:cursor-not-allowed disabled:text-slate-500"
-                      disabled={!apiKey}
-                    >
-                      Devam et
-                    </button>
-                  ) : null}
-                </div>
-              </div>
+          {currentErrorMessage && currentPhase !== "idle" ? (
+            <div className="absolute left-4 top-20 z-10 max-w-md rounded-[22px] border border-red-400/30 bg-red-950/78 px-4 py-3 text-sm leading-6 text-red-100 backdrop-blur-md">
+              {currentErrorMessage}
             </div>
           ) : null}
 
-          <div className="absolute left-4 top-4 z-10 flex max-w-xl flex-col gap-3">
-            <div className="rounded-full border border-white/16 bg-slate-950/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.32em] text-slate-200 backdrop-blur-md">
-              Panoramada gezin, sonra tahmini sag alttaki haritaya birak.
-            </div>
-
-            {currentErrorMessage && currentPhase !== "idle" ? (
-              <div className="max-w-md rounded-[22px] border border-red-400/30 bg-red-950/70 px-4 py-3 text-sm leading-6 text-red-100 backdrop-blur-md">
-                {currentErrorMessage}
-              </div>
-            ) : null}
-
+          <div className="absolute bottom-4 left-4 z-10 max-w-md">
             {roundScore !== null ? (
-              <div className="max-w-md rounded-[24px] border border-white/12 bg-slate-950/78 px-5 py-4 text-sm leading-6 text-slate-100 backdrop-blur-md">
+              <div className="rounded-[24px] border border-white/12 bg-slate-950/82 px-5 py-4 text-sm leading-6 text-slate-100 backdrop-blur-md">
                 <p className="text-[0.7rem] font-semibold uppercase tracking-[0.28em] text-slate-300">
                   Sonuc
                 </p>
@@ -753,26 +713,21 @@ export function StreetGuessGame() {
                     {formatPoints(roundScore)}
                   </span>
                 </p>
-                {target ? (
-                  <p className="mt-2 text-xs uppercase tracking-[0.24em] text-slate-400">
-                    Kaynak index: {target.sourceIndex}
-                  </p>
-                ) : null}
               </div>
             ) : (
-              <div className="max-w-md rounded-[24px] border border-white/12 bg-slate-950/74 px-5 py-4 text-sm leading-6 text-slate-100 backdrop-blur-md">
+              <div className="rounded-[24px] border border-white/12 bg-slate-950/76 px-5 py-4 text-sm leading-6 text-slate-100 backdrop-blur-md">
                 {currentPhase === "loading-round" || currentPhase === "starting"
-                  ? "KML havuzu ve Street View verisi yukleniyor."
+                  ? "Street View ve KML havuzu hazirlaniyor."
                   : currentPhase === "playing"
-                    ? "Haritaya tiklayarak tahminini yerlestir, sonra tahmini gonder."
-                    : "Oyun baslatilmaya hazir."}
+                    ? "Sagdaki haritaya tiklayip tahminini yerlestir. Sonra gonder."
+                    : "Yeni bir oyun baslatmak icin modalı kullan."}
               </div>
             )}
           </div>
 
           <div
             className={`absolute bottom-4 right-4 z-20 transition-all duration-300 ${
-              isMapExpanded ? "w-[min(96vw,760px)]" : "w-[min(92vw,430px)]"
+              isMapExpanded ? "w-[min(96vw,760px)]" : "w-[min(90vw,360px)] sm:w-[380px]"
             }`}
           >
             <div className="overflow-hidden rounded-[30px] border border-white/12 bg-slate-950/88 shadow-[0_20px_60px_rgba(2,6,23,0.55)] backdrop-blur-xl">
@@ -805,7 +760,7 @@ export function StreetGuessGame() {
               <div
                 ref={mapElementRef}
                 className={`w-full bg-slate-900 transition-all duration-300 ${
-                  isMapExpanded ? "h-[52vh] min-h-[360px]" : "h-72 sm:h-80"
+                  isMapExpanded ? "h-[52vh] min-h-[360px]" : "h-56 sm:h-64"
                 }`}
               />
 
@@ -830,6 +785,122 @@ export function StreetGuessGame() {
               </div>
             </div>
           </div>
+
+          {phase === "idle" ? (
+            <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/48 p-6 backdrop-blur-sm">
+              <div className="w-full max-w-2xl rounded-[32px] border border-white/12 bg-slate-950/90 p-8 text-center shadow-[0_24px_80px_rgba(2,6,23,0.45)] backdrop-blur-xl">
+                <p className="text-[0.72rem] font-semibold uppercase tracking-[0.34em] text-cyan-200">
+                  Oyun Ayari
+                </p>
+                <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">
+                  Once round suresini sec, sonra oyunu baslat.
+                </h2>
+                <p className="mt-4 text-sm leading-7 text-slate-200 sm:text-base">
+                  Street View viewport oyun baslayinca tam ekran icin izin isteyecek. Harita sagda
+                  kucuk acilir, istersen daha sonra buyutebilirsin.
+                </p>
+
+                <div className="mt-6 rounded-[24px] border border-white/10 bg-white/6 p-5 text-left">
+                  <label
+                    htmlFor="round-duration"
+                    className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-slate-300"
+                  >
+                    Round suresi
+                  </label>
+                  <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center">
+                    <select
+                      id="round-duration"
+                      value={roundDurationSeconds}
+                      onChange={(event) => {
+                        const nextDuration = Number(event.target.value);
+                        setRoundDurationSeconds(nextDuration);
+                        setTimer(nextDuration);
+                      }}
+                      className="rounded-2xl border border-white/12 bg-slate-950/85 px-4 py-3 text-sm font-semibold text-white outline-none"
+                    >
+                      {ROUND_DURATION_OPTIONS.map((durationOption) => (
+                        <option key={durationOption} value={durationOption}>
+                          {durationOption} saniye
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-sm leading-6 text-slate-300">
+                      Secilen sure oyun icinde header&apos;da gosterilir ve kayitli oturum
+                      yenilendiginde korunur.
+                    </p>
+                  </div>
+                </div>
+
+                {currentErrorMessage ? (
+                  <div className="mt-5 rounded-[22px] border border-red-400/30 bg-red-950/70 px-4 py-3 text-sm leading-6 text-red-100">
+                    {currentErrorMessage}
+                  </div>
+                ) : null}
+
+                <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => openLaunchPrompt("new")}
+                    className="rounded-full bg-lime-400 px-6 py-3 text-sm font-bold uppercase tracking-[0.22em] text-slate-950 transition hover:bg-lime-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+                    disabled={!apiKey}
+                  >
+                    Oyna
+                  </button>
+
+                  {hasRecoverableSession ? (
+                    <button
+                      type="button"
+                      onClick={() => openLaunchPrompt("resume")}
+                      className="rounded-full border border-white/14 bg-white/7 px-6 py-3 text-sm font-bold uppercase tracking-[0.22em] text-white transition hover:bg-white/12 disabled:cursor-not-allowed disabled:text-slate-500"
+                      disabled={!apiKey}
+                    >
+                      Kayitli oyuna don
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {launchIntent ? (
+            <div className="absolute inset-0 z-40 flex items-center justify-center bg-slate-950/58 p-6 backdrop-blur-sm">
+              <div className="w-full max-w-lg rounded-[30px] border border-white/12 bg-slate-950/92 p-7 shadow-[0_24px_80px_rgba(2,6,23,0.45)]">
+                <p className="text-[0.72rem] font-semibold uppercase tracking-[0.32em] text-amber-200">
+                  Tam Ekran Uyarisi
+                </p>
+                <h3 className="mt-3 text-2xl font-semibold text-white">
+                  Oyun baslarken Street View icin tam ekran izni isteyelim mi?
+                </h3>
+                <p className="mt-4 text-sm leading-7 text-slate-200">
+                  Tam ekranda Street View daha temiz acilir. Sağdaki kucuk harita yerinde kalir ve
+                  istersen oyun sirasinda buyutulebilir.
+                </p>
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => void handleLaunchDecision(true)}
+                    className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-bold uppercase tracking-[0.22em] text-slate-950 transition hover:bg-cyan-200"
+                  >
+                    Tam ekranla baslat
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleLaunchDecision(false)}
+                    className="rounded-full border border-white/14 bg-white/7 px-5 py-3 text-sm font-bold uppercase tracking-[0.22em] text-white transition hover:bg-white/12"
+                  >
+                    Normal baslat
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeLaunchPrompt}
+                    className="rounded-full border border-white/10 bg-transparent px-5 py-3 text-sm font-bold uppercase tracking-[0.22em] text-slate-400 transition hover:border-white/14 hover:text-white"
+                  >
+                    Vazgec
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </section>
 
         <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
