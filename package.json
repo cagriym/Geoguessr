@@ -4,12 +4,17 @@
   "private": true,
   "scripts": {
     "build:kml-points": "node scripts/build-kml-points.mjs",
+    "db:seed:clues": "node --env-file=.env.local --import tsx scripts/sync-clues-to-supabase.mts",
+    "db:push:remote": "npx supabase@latest db push --linked",
+    "db:link:remote": "npx supabase@latest link --project-ref vgcmsdlhztdndflkslcg",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "vercel:pull": "npx vercel@latest env pull .env.local --yes"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.101.1",
     "@types/google.maps": "^3.58.1",
     "next": "16.2.2",
     "react": "19.2.4",
@@ -23,6 +28,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
     "tailwindcss": "^4",
+    "tsx": "^4.20.6",
     "typescript": "^5"
   }
 }

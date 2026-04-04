@@ -15,8 +15,12 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Street View Guess Game",
-  description: "Google Maps Street View altyapisiyla calisan GeoGuessr benzeri Next.js oyun prototipi.",
+  description:
+    "Google Maps Street View altyapisiyla calisan, clue atlas sistemine sahip GeoGuessr benzeri Next.js oyun prototipi.",
+  title: {
+    default: "Street View Guess Game",
+    template: "%s | Street View Guess Game",
+  },
 };
 
 export default function RootLayout({

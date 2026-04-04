@@ -16,8 +16,11 @@ import {
   haversineDistanceKm,
   scoreFromDistance,
 } from "@/lib/geo";
+import { resolveLocationContext } from "@/lib/clues/location-context";
 import { type KmlStreetViewRound, loadKmlLocationPool, resolveStreetViewRoundFromKml } from "@/lib/kml-location-pool";
 import { loadGoogleMapsApi } from "@/lib/maps-loader";
+import { RoundClueInsights } from "@/components/clues/round-clue-insights";
+import type { ClueRecord, ResolvedLocationContext } from "@/lib/clues/types";
 
 const TOTAL_ROUNDS = 5;
 const ROUND_TIME_SECONDS = 90;
@@ -56,7 +59,7 @@ function StatCard({
   );
 }
 
-export function StreetGuessGame() {
+export function StreetGuessGame({ starterClues }: { starterClues: ClueRecord[] }) {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
   const gameViewportRef = useRef<HTMLDivElement | null>(null);
@@ -66,6 +69,7 @@ export function StreetGuessGame() {
   const mapRef = useRef<google.maps.Map | null>(null);
   const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
   const streetViewServiceRef = useRef<google.maps.StreetViewService | null>(null);
+  const geocoderRef = useRef<google.maps.Geocoder | null>(null);
   const mapClickListenerRef = useRef<google.maps.MapsEventListener | null>(null);
 
   const guessMarkerRef = useRef<google.maps.Marker | null>(null);
@@ -89,7 +93,11 @@ export function StreetGuessGame() {
   const [history, setHistory] = useState<RoundSummary[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
+  const [isViewportFullscreenLike, setIsViewportFullscreenLike] = useState(false);
   const [launchIntent, setLaunchIntent] = useState<LaunchIntent>(null);
+  const [locationContext, setLocationContext] = useState<ResolvedLocationContext | null | undefined>(
+    undefined
+  );
   const hasRecoverableSession = useSyncExternalStore(
     subscribeToPersistedGameState,
     () => Boolean(loadPersistedGameState()),
@@ -99,6 +107,30 @@ export function StreetGuessGame() {
   useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const syncFullscreenLikeState = () => {
+      const browserFullscreenByApi = Boolean(document.fullscreenElement);
+      const browserFullscreenByViewport =
+        Math.abs(window.outerHeight - window.innerHeight) < 8 &&
+        Math.abs(window.outerWidth - window.innerWidth) < 8;
+
+      setIsViewportFullscreenLike(browserFullscreenByApi || browserFullscreenByViewport);
+    };
+
+    syncFullscreenLikeState();
+    window.addEventListener("resize", syncFullscreenLikeState);
+    document.addEventListener("fullscreenchange", syncFullscreenLikeState);
+
+    return () => {
+      window.removeEventListener("resize", syncFullscreenLikeState);
+      document.removeEventListener("fullscreenchange", syncFullscreenLikeState);
+    };
+  }, []);
 
   const clearMapOverlays = useCallback(() => {
     guessMarkerRef.current?.setMap(null);
@@ -285,6 +317,10 @@ export function StreetGuessGame() {
       streetViewServiceRef.current = new googleMaps.maps.StreetViewService();
     }
 
+    if (!geocoderRef.current) {
+      geocoderRef.current = new googleMaps.maps.Geocoder();
+    }
+
     if (mapRef.current && !mapClickListenerRef.current) {
       mapClickListenerRef.current = mapRef.current.addListener(
         "click",
@@ -364,6 +400,7 @@ export function StreetGuessGame() {
       setErrorMessage(null);
       setRound(nextRound);
       setGuess(null);
+      setLocationContext(undefined);
       setRoundScore(null);
       setRoundDistance(null);
       setDeadlineTs(null);
@@ -436,6 +473,7 @@ export function StreetGuessGame() {
       setRound(snapshot.round);
       setGuess(snapshot.guess);
       setTarget(snapshot.target);
+      setLocationContext(undefined);
       setRoundScore(snapshot.roundScore);
       setRoundDistance(snapshot.roundDistance);
       setErrorMessage(null);
@@ -560,6 +598,33 @@ export function StreetGuessGame() {
   }, [deadlineTs, phase]);
 
   useEffect(() => {
+    if (!target || (phase !== "revealed" && phase !== "finished")) {
+      return;
+    }
+
+    const geocoder = geocoderRef.current;
+
+    if (!geocoder) {
+      return;
+    }
+
+    let isMounted = true;
+
+    void resolveLocationContext(geocoder, target.position)
+      .then((nextContext) => {
+        if (!isMounted) {
+          return;
+        }
+
+        setLocationContext(nextContext);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [phase, target]);
+
+  useEffect(() => {
     const map = mapRef.current;
 
     if (!map || !window.google?.maps) {
@@ -627,6 +692,7 @@ export function StreetGuessGame() {
     ? errorMessage
     : "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY tanimlanmadi. .env.local dosyasina Google Maps anahtari ekle.";
 
+  const isImmersiveGameMode = phase !== "idle" && isViewportFullscreenLike;
   const readyToGuess = currentPhase === "playing" && Boolean(guess);
   const canAdvance = currentPhase === "revealed" && round < TOTAL_ROUNDS;
   const shouldShowSummary = currentPhase === "finished";
@@ -636,9 +702,23 @@ export function StreetGuessGame() {
       : history.reduce((total, item) => total + (item.distanceKm ?? 0), 0) / history.length;
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#1d4ed8_0%,#0f172a_35%,#020617_100%)] px-4 py-5 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
-        <section className="flex flex-col gap-4 rounded-[30px] border border-white/12 bg-white/6 p-5 shadow-[0_24px_80px_rgba(2,6,23,0.45)] backdrop-blur-xl lg:flex-row lg:items-end lg:justify-between">
+    <main
+      className={`bg-[radial-gradient(circle_at_top,#1d4ed8_0%,#0f172a_35%,#020617_100%)] text-white ${
+        isImmersiveGameMode
+          ? "h-screen overflow-hidden px-0 py-0"
+          : "min-h-screen px-4 py-5 sm:px-6 lg:px-8"
+      }`}
+    >
+      <div
+        className={`mx-auto flex w-full flex-col ${
+          isImmersiveGameMode ? "h-screen max-w-none gap-0" : "max-w-7xl gap-5"
+        }`}
+      >
+        <section
+          className={`flex flex-col gap-4 rounded-[30px] border border-white/12 bg-white/6 p-5 shadow-[0_24px_80px_rgba(2,6,23,0.45)] backdrop-blur-xl lg:flex-row lg:items-end lg:justify-between ${
+            isImmersiveGameMode ? "hidden" : ""
+          }`}
+        >
           <div className="max-w-3xl">
             <p className="text-[0.72rem] font-semibold uppercase tracking-[0.38em] text-cyan-200">
               Street View Guess Game
@@ -672,9 +752,16 @@ export function StreetGuessGame() {
 
         <section
           ref={gameViewportRef}
-          className="relative overflow-hidden rounded-[36px] border border-white/10 bg-slate-950/65 shadow-[0_30px_120px_rgba(15,23,42,0.75)]"
+          className={`relative overflow-hidden bg-slate-950/65 ${
+            isImmersiveGameMode
+              ? "h-screen rounded-none border-none shadow-none"
+              : "rounded-[36px] border border-white/10 shadow-[0_30px_120px_rgba(15,23,42,0.75)]"
+          }`}
         >
-          <div ref={streetViewElementRef} className="h-[58vh] min-h-[440px] w-full lg:h-[78vh]" />
+          <div
+            ref={streetViewElementRef}
+            className={`w-full ${isImmersiveGameMode ? "h-screen min-h-screen" : "h-[58vh] min-h-[440px] lg:h-[78vh]"}`}
+          />
           <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(2,6,23,0.15),rgba(2,6,23,0.5))]" />
 
           <div className="absolute left-4 top-4 z-10 flex flex-wrap items-center gap-2">
@@ -682,8 +769,18 @@ export function StreetGuessGame() {
               Panoramada gezin, sonra sagdaki haritada tahmin birak.
             </div>
             <div className="rounded-full border border-white/16 bg-slate-950/74 px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200 backdrop-blur-md">
-              Round suresi {roundDurationSeconds}s
+              {currentPhase === "playing" ? `Kalan sure ${timer}s` : `Secili sure ${roundDurationSeconds}s`}
             </div>
+            {isImmersiveGameMode ? (
+              <>
+                <div className="rounded-full border border-white/16 bg-slate-950/74 px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em] text-emerald-200 backdrop-blur-md">
+                  Skor {formatPoints(score)}
+                </div>
+                <div className="rounded-full border border-white/16 bg-slate-950/74 px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em] text-fuchsia-200 backdrop-blur-md">
+                  Tur {round}/{TOTAL_ROUNDS}
+                </div>
+              </>
+            ) : null}
           </div>
 
           {currentErrorMessage && currentPhase !== "idle" ? (
@@ -713,6 +810,14 @@ export function StreetGuessGame() {
                     {formatPoints(roundScore)}
                   </span>
                 </p>
+                {locationContext?.countryName ? (
+                  <p className="text-slate-200">
+                    Cozulen ulke:{" "}
+                    <span className="font-semibold text-cyan-200">
+                      {locationContext.countryName}
+                    </span>
+                  </p>
+                ) : null}
               </div>
             ) : (
               <div className="rounded-[24px] border border-white/12 bg-slate-950/76 px-5 py-4 text-sm leading-6 text-slate-100 backdrop-blur-md">
@@ -720,9 +825,21 @@ export function StreetGuessGame() {
                   ? "Street View ve KML havuzu hazirlaniyor."
                   : currentPhase === "playing"
                     ? "Sagdaki haritaya tiklayip tahminini yerlestir. Sonra gonder."
-                    : "Yeni bir oyun baslatmak icin modalı kullan."}
+                    : "Yeni bir oyun baslatmak icin modali kullan."}
               </div>
             )}
+            {(currentPhase === "playing" ||
+              currentPhase === "revealed" ||
+              currentPhase === "finished" ||
+              currentPhase === "loading-round" ||
+              currentPhase === "starting") ? (
+              <RoundClueInsights
+                isResolvingLocationContext={locationContext === undefined}
+                locationContext={locationContext}
+                phase={currentPhase}
+                starterClues={starterClues}
+              />
+            ) : null}
           </div>
 
           <div
@@ -903,7 +1020,11 @@ export function StreetGuessGame() {
           ) : null}
         </section>
 
-        <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <section
+          className={`grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] ${
+            isImmersiveGameMode ? "hidden" : ""
+          }`}
+        >
           <div className="rounded-[30px] border border-white/12 bg-white/6 p-5 backdrop-blur-xl">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -968,7 +1089,7 @@ export function StreetGuessGame() {
           </aside>
         </section>
 
-        {shouldShowSummary ? (
+        {shouldShowSummary && !isImmersiveGameMode ? (
           <section className="rounded-[32px] border border-white/12 bg-slate-950/78 p-6 backdrop-blur-xl">
             <p className="text-[0.72rem] font-semibold uppercase tracking-[0.32em] text-cyan-200">
               Oyun bitti
