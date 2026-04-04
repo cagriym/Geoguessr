@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 
-import { clueCategoryMeta, clueRecords, countryProfiles } from "../src/lib/clues/seed";
+import * as clueSeedModule from "../src/lib/clues/seed";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const secretKey = process.env.SUPABASE_SECRET_KEY;
@@ -18,13 +18,19 @@ const supabase = createClient(supabaseUrl, secretKey, {
   },
 });
 
-const categoryRows = clueCategoryMeta.map((category) => ({
+const clueSeed = (("default" in clueSeedModule ? clueSeedModule.default : clueSeedModule) as unknown) as {
+  clueCategoryMeta: typeof import("../src/lib/clues/seed").clueCategoryMeta;
+  clueRecords: typeof import("../src/lib/clues/seed").clueRecords;
+  countryProfiles: typeof import("../src/lib/clues/seed").countryProfiles;
+};
+
+const categoryRows = clueSeed.clueCategoryMeta.map((category) => ({
   description: category.description,
   label: category.label,
   slug: category.slug,
 }));
 
-const countryRows = countryProfiles.map((country) => ({
+const countryRows = clueSeed.countryProfiles.map((country) => ({
   code: country.code,
   compare_country_codes: country.compareCountryCodes,
   confused_with_country_codes: country.confusedWithCountryCodes,
@@ -35,7 +41,7 @@ const countryRows = countryProfiles.map((country) => ({
   strongest_beginner_clue_ids: country.strongestBeginnerClueIds,
 }));
 
-const clueRows = clueRecords.map((clue) => ({
+const clueRows = clueSeed.clueRecords.map((clue) => ({
   beginner_friendly: clue.beginnerFriendly,
   category_slug: clue.category,
   common_confusion_country_codes: clue.commonConfusionCountryCodes,
