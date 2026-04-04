@@ -5,6 +5,7 @@
   "scripts": {
     "build:kml-points": "node scripts/build-kml-points.mjs",
     "db:seed:clues": "node --env-file=.env.local --import tsx scripts/sync-clues-to-supabase.mts",
+    "db:seed:game": "node --env-file=.env.local --import tsx scripts/sync-game-data-to-supabase.mts",
     "db:push:remote": "npx supabase@latest db push --linked",
     "db:link:remote": "npx supabase@latest link --project-ref vgcmsdlhztdndflkslcg",
     "dev": "next dev",

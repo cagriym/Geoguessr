@@ -1,4 +1,4 @@
-import type { KmlStreetViewRound } from "@/lib/kml-location-pool";
+import type { GameRoundPayload, RevealedRoundPayload } from "@/lib/game-locations/types";
 
 export type PersistedRoundSummary = {
   distanceKm: number | null;
@@ -11,14 +11,15 @@ export type PersistedGameState = {
   guess: google.maps.LatLngLiteral | null;
   history: PersistedRoundSummary[];
   phase: "playing" | "revealed" | "finished";
+  revealedRound: RevealedRoundPayload | null;
   round: number;
   roundDurationSeconds: number;
   roundDistance: number | null;
   roundScore: number | null;
   score: number;
-  target: KmlStreetViewRound | null;
-  usedIndices: number[];
-  version: 2;
+  target: GameRoundPayload | null;
+  usedLocationIds: string[];
+  version: 3;
 };
 
 const STORAGE_KEY = "street-view-guess-game:session";
@@ -38,7 +39,7 @@ export function loadPersistedGameState() {
 
     const parsed = JSON.parse(rawValue) as PersistedGameState;
 
-    if (parsed.version !== 2) {
+    if (parsed.version !== 3) {
       window.sessionStorage.removeItem(STORAGE_KEY);
       return null;
     }
